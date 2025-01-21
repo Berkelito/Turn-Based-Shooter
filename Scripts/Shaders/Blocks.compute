@@ -1,0 +1,85 @@
+#pragma kernel CSMain
+#pragma kernel SetTileData
+#include <UnityShaderVariables.cginc>
+
+struct Block
+{
+    float3 StartPos;
+    float4x4 Mat;
+
+    int3 GridPos;
+
+    float3 LowColor;
+    float3 HighColor;
+    float4 Col;
+
+    float TimeOffset;
+};
+
+struct Tile
+{
+    int3 Position;
+    float State;
+};
+
+RWStructuredBuffer<Block> data;
+
+RWStructuredBuffer<Tile> precomputedData;
+
+RWTexture3D<float> tileData;
+
+[numthreads(8,1,1)]
+void SetTileData(uint3 id : SV_DispatchThreadID)
+{
+    tileData[precomputedData[id.x].Position] = precomputedData[id.x].State;
+}
+
+
+float4 PlayerPosition;
+
+[numthreads(64,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    const float3 blockPos = data[id.x].StartPos;
+    const float t = (sin(_Time.y * 2 + data[id.x].TimeOffset + distance(float3(blockPos.x, 0, blockPos.z), PlayerPosition.xyz) / 5) + 1) / 2;
+
+    const float state = tileData[data[id.x].GridPos];
+
+    if (state == 0) // not seen
+    {
+        if (data[id.x].Col.w == 1) //seen before
+        {
+            float4 finalCol = float4(lerp(data[id.x].LowColor, data[id.x].HighColor, t).xyz, 1);  
+            data[id.x].Col = lerp(float4(0,0,0,1), finalCol, 0.3f);
+        }
+        else
+        {
+            data[id.x].Col = float4(0,0,0,0);
+        }
+    }
+    else //seen
+    {
+        const float3 endPos = blockPos + float3(0, 2, 0);
+
+        const float3 pos = lerp(blockPos, endPos, t);
+
+        float4 finalCol = float4(lerp(data[id.x].LowColor, data[id.x].HighColor, t).xyz, 1);
+
+        if (state == 0.2f)
+        {
+            finalCol = float4(lerp(finalCol, float4(1,0,0,1), 1).xyz, 1); 
+        }
+        float4x4 mat = data[id.x].Mat;
+
+        mat[0][3] = pos.x;
+        mat[1][3] = pos.y;
+        mat[2][3] = pos.z;
+
+        data[id.x].Mat = mat;
+        data[id.x].Col = finalCol;
+    }
+    if (abs(blockPos.x) % 16 <= 1 || abs(blockPos.z) % 16 <= 1) //16 is the tilesize
+    {
+        data[id.x].Col = float4(0,0,0,0);    
+    }
+}
